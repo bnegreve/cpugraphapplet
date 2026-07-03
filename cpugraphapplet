@@ -1,0 +1,92 @@
+#!/usr/bin/env python3
+"""Waybar custom module: 16-sample sparkline of averaged CPU usage."""
+
+import json
+import os
+import sys
+from pathlib import Path
+
+BLOCKS = "▁▂▃▄▅▆▇█"
+HISTORY_LEN = 16
+
+
+def state_path() -> Path:
+    base = os.environ.get("XDG_RUNTIME_DIR") or "/tmp"
+    return Path(base) / "cpugraphapplet.state"
+
+
+def read_cpu_totals() -> tuple[int, int]:
+    with open("/proc/stat") as f:
+        fields = f.readline().split()
+    # /proc/stat cpu line: user nice system idle iowait irq softirq steal guest guest_nice
+    # user already includes guest, nice already includes guest_nice — sum only the first 8.
+    values = [int(x) for x in fields[1:9]]
+    idle = values[3] + values[4]
+    total = sum(values)
+    return total, idle
+
+
+def load_state() -> dict:
+    try:
+        return json.loads(state_path().read_text())
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return {"prev_total": None, "prev_idle": None, "history": []}
+
+
+def save_state(state: dict) -> None:
+    state_path().write_text(json.dumps(state))
+
+
+def sparkline(history: list[float]) -> str:
+    # Left-pad with spaces so the graph is always HISTORY_LEN wide
+    # and grows from the right on first runs.
+    padded: list[float | None] = [None] * (HISTORY_LEN - len(history)) + list(history)
+    out = []
+    for v in padded:
+        if v is None:
+            out.append(" ")
+        else:
+            idx = min(len(BLOCKS) - 1, int(v / 100 * len(BLOCKS)))
+            out.append(BLOCKS[idx])
+    return "".join(out)
+
+
+def classify(pct: float) -> str:
+    if pct < 25:
+        return "low"
+    if pct < 60:
+        return "medium"
+    if pct < 85:
+        return "high"
+    return "critical"
+
+
+def main() -> None:
+    total, idle = read_cpu_totals()
+    state = load_state()
+
+    prev_total = state.get("prev_total")
+    prev_idle = state.get("prev_idle")
+    history: list[float] = state.get("history", [])
+
+    if prev_total is not None and total > prev_total:
+        dt = total - prev_total
+        di = idle - prev_idle
+        pct = max(0.0, min(100.0, (dt - di) / dt * 100.0))
+        history.append(round(pct, 1))
+        history = history[-HISTORY_LEN:]
+
+    save_state({"prev_total": total, "prev_idle": idle, "history": history})
+
+    current = history[-1] if history else 0.0
+    output = {
+        "text": sparkline(history),
+        "tooltip": f"CPU: {current:.1f}%  (avg of all cores, last {len(history)}s)",
+        "class": classify(current),
+        "percentage": int(current),
+    }
+    print(json.dumps(output))
+
+
+if __name__ == "__main__":
+    main()
