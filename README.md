@@ -5,19 +5,17 @@ average CPU usage over the last 16 seconds as a Unicode sparkline
 (`▁▂▃▄▅▆▇█`) directly in the bar.
 
 - Single Python file, standard library only — no `pip install`, no venv.
-- One averaged graph across all cores (works fine with 24 cores / HT).
+- One averaged graph across all cores (remains usable even with a large number of cores).
 - 8 discrete levels, plus a `class` attribute for CSS-based color changes.
 - Hover tooltip shows the current numeric percentage.
 
 ## Install
 
 ```bash
-git clone git@github.com:bnegreve/cpugraphapplet.git
 mkdir -p ~/.config/waybar/scripts
-ln -s "$(pwd)/cpugraphapplet/cpugraphapplet" ~/.config/waybar/scripts/cpugraphapplet
+cd  ~/.config/waybar/scripts
+git clone git@github.com:bnegreve/cpugraphapplet.git
 ```
-
-(Use `cp` instead of `ln -s` if you'd rather not keep the clone around.)
 
 ## Waybar config
 
@@ -25,7 +23,7 @@ Add to `~/.config/waybar/config`:
 
 ```jsonc
 "custom/cpu": {
-    "exec": "$HOME/.config/waybar/scripts/cpugraphapplet",
+    "exec": "$HOME/.config/waybar/scripts/cpugraphapplet/cpugraphapplet",
     "interval": 1,
     "return-type": "json",
     "tooltip": true
