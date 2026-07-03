@@ -75,9 +75,6 @@ If the block characters look cramped, force a monospace font:
 ## Notes
 
 - **State file:** `$XDG_RUNTIME_DIR/cpugraphapplet.<mode>.state` (falls back
-  to `/tmp`). Wiped on reboot, which is what you want.
-- **First 16 seconds after start:** the graph fills in from the right as
-  samples accumulate. Width stays fixed at 16 characters so the bar never
-  jumps.
-- **Requirements:** Python 3 (any modern version) and a font that renders
+  to `/tmp`). Wiped on reboot.  jumps.
+- **Requirements:** Python 3 (any modern version) and a mono font that renders
   U+2581–U+2588. Most Nerd Fonts and DejaVu Sans Mono are fine.
