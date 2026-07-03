@@ -9,10 +9,12 @@ Modes:
 import argparse
 import json
 import os
+import time
 from pathlib import Path
 
 BLOCKS = "▁▂▃▄▅▆▇█"
 HISTORY_LEN = 16
+HZ = os.sysconf(os.sysconf_names["SC_CLK_TCK"])
 
 
 def state_path(mode: str) -> Path:
@@ -90,9 +92,11 @@ def main() -> None:
     args = parser.parse_args()
 
     cores = read_per_cpu_totals()
+    now_wall = time.monotonic()
     state = load_state(args.mode)
 
     prev_cores = state.get("prev_cores")
+    prev_wall = state.get("prev_wall")
     history: list[float] = state.get("history", [])
     # Reset if core count changed (e.g. CPU hotplug) — otherwise the delta
     # loop would silently drop cores or misalign indices.
@@ -100,20 +104,23 @@ def main() -> None:
         history = []
         prev_cores = None
 
-    if prev_cores is not None:
-        per_core_pct: list[float] = []
-        for (total, idle), (pt, pi) in zip(cores, prev_cores):
-            dt = total - pt
-            if dt <= 0:
-                continue
-            di = idle - pi
-            per_core_pct.append(max(0.0, min(100.0, (dt - di) / dt * 100.0)))
-        if per_core_pct:
+    # Normalize by wall time × HZ, not by per-core jiffy delta. On NO_HZ
+    # kernels an idle core barely accumulates ticks, so busy/total spuriously
+    # spikes to ~100% on a single stray jiffy. busy/(HZ·wall_seconds) gives
+    # "fraction of the core actually spent working", which is stable.
+    if prev_cores is not None and prev_wall is not None:
+        dt_wall = now_wall - prev_wall
+        if dt_wall >= 0.1:
+            denom = HZ * dt_wall
+            per_core_pct: list[float] = []
+            for (total, idle), (pt, pi) in zip(cores, prev_cores):
+                busy = (total - pt) - (idle - pi)
+                per_core_pct.append(max(0.0, min(100.0, 100.0 * busy / denom)))
             pct = max(per_core_pct) if args.mode == "max" else sum(per_core_pct) / len(per_core_pct)
             history.append(round(pct, 1))
             history = history[-HISTORY_LEN:]
 
-    save_state(args.mode, {"prev_cores": cores, "history": history})
+    save_state(args.mode, {"prev_cores": cores, "prev_wall": now_wall, "history": history})
 
     current = history[-1] if history else 0.0
     label = "max core" if args.mode == "max" else "avg of all cores"
