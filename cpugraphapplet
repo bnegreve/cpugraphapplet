@@ -2,8 +2,8 @@
 """Waybar custom module: 16-sample sparkline of CPU usage.
 
 Modes:
-  avg  average usage across all cores (default)
-  max  usage of the single most-loaded core
+  max  usage of the single most-loaded core (default)
+  avg  average usage across all cores
 """
 
 import argparse
@@ -123,8 +123,8 @@ def main() -> None:
     parser.add_argument(
         "--mode",
         choices=("avg", "max"),
-        default="avg",
-        help="avg = average across all cores (default); max = most-loaded core",
+        default="max",
+        help="max = most-loaded core (default); avg = average across all cores",
     )
     args = parser.parse_args()
 
