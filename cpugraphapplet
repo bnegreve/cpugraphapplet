@@ -1,40 +1,57 @@
 #!/usr/bin/env python3
-"""Waybar custom module: 16-sample sparkline of averaged CPU usage."""
+"""Waybar custom module: 16-sample sparkline of CPU usage.
 
+Modes:
+  avg  average usage across all cores (default)
+  max  usage of the single most-loaded core
+"""
+
+import argparse
 import json
 import os
-import sys
 from pathlib import Path
 
 BLOCKS = "▁▂▃▄▅▆▇█"
 HISTORY_LEN = 16
 
 
-def state_path() -> Path:
+def state_path(mode: str) -> Path:
+    # Separate state per mode so two waybar modules (avg + max) can run in
+    # parallel without clobbering each other's history.
     base = os.environ.get("XDG_RUNTIME_DIR") or "/tmp"
-    return Path(base) / "cpugraphapplet.state"
+    return Path(base) / f"cpugraphapplet.{mode}.state"
 
 
-def read_cpu_totals() -> tuple[int, int]:
+def read_per_cpu_totals() -> list[tuple[int, int]]:
+    """Return [(total, idle), ...] per core, skipping the aggregate 'cpu' line.
+
+    /proc/stat cpuN line: user nice system idle iowait irq softirq steal guest guest_nice
+    user already includes guest, nice already includes guest_nice — sum only the first 8.
+    """
+    cores: list[tuple[int, int]] = []
     with open("/proc/stat") as f:
-        fields = f.readline().split()
-    # /proc/stat cpu line: user nice system idle iowait irq softirq steal guest guest_nice
-    # user already includes guest, nice already includes guest_nice — sum only the first 8.
-    values = [int(x) for x in fields[1:9]]
-    idle = values[3] + values[4]
-    total = sum(values)
-    return total, idle
+        for line in f:
+            if not line.startswith("cpu"):
+                break
+            name, *rest = line.split()
+            if name == "cpu":
+                continue
+            values = [int(x) for x in rest[:8]]
+            idle = values[3] + values[4]
+            total = sum(values)
+            cores.append((total, idle))
+    return cores
 
 
-def load_state() -> dict:
+def load_state(mode: str) -> dict:
     try:
-        return json.loads(state_path().read_text())
+        return json.loads(state_path(mode).read_text())
     except (FileNotFoundError, json.JSONDecodeError, OSError):
-        return {"prev_total": None, "prev_idle": None, "history": []}
+        return {"prev_cores": None, "history": []}
 
 
-def save_state(state: dict) -> None:
-    state_path().write_text(json.dumps(state))
+def save_state(mode: str, state: dict) -> None:
+    state_path(mode).write_text(json.dumps(state))
 
 
 def sparkline(history: list[float]) -> str:
@@ -62,26 +79,46 @@ def classify(pct: float) -> str:
 
 
 def main() -> None:
-    total, idle = read_cpu_totals()
-    state = load_state()
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument(
+        "--mode",
+        choices=("avg", "max"),
+        default="avg",
+        help="avg = average across all cores (default); max = most-loaded core",
+    )
+    args = parser.parse_args()
 
-    prev_total = state.get("prev_total")
-    prev_idle = state.get("prev_idle")
+    cores = read_per_cpu_totals()
+    state = load_state(args.mode)
+
+    prev_cores = state.get("prev_cores")
     history: list[float] = state.get("history", [])
+    # Reset if core count changed (e.g. CPU hotplug) — otherwise the delta
+    # loop would silently drop cores or misalign indices.
+    if prev_cores is not None and len(prev_cores) != len(cores):
+        history = []
+        prev_cores = None
 
-    if prev_total is not None and total > prev_total:
-        dt = total - prev_total
-        di = idle - prev_idle
-        pct = max(0.0, min(100.0, (dt - di) / dt * 100.0))
-        history.append(round(pct, 1))
-        history = history[-HISTORY_LEN:]
+    if prev_cores is not None:
+        per_core_pct: list[float] = []
+        for (total, idle), (pt, pi) in zip(cores, prev_cores):
+            dt = total - pt
+            if dt <= 0:
+                continue
+            di = idle - pi
+            per_core_pct.append(max(0.0, min(100.0, (dt - di) / dt * 100.0)))
+        if per_core_pct:
+            pct = max(per_core_pct) if args.mode == "max" else sum(per_core_pct) / len(per_core_pct)
+            history.append(round(pct, 1))
+            history = history[-HISTORY_LEN:]
 
-    save_state({"prev_total": total, "prev_idle": idle, "history": history})
+    save_state(args.mode, {"prev_cores": cores, "history": history})
 
     current = history[-1] if history else 0.0
+    label = "max core" if args.mode == "max" else "avg of all cores"
     output = {
         "text": sparkline(history),
-        "tooltip": f"CPU: {current:.1f}%  (avg of all cores, last {len(history)}s)",
+        "tooltip": f"CPU: {current:.1f}%  ({label}, last {len(history)}s)",
         "class": classify(current),
         "percentage": int(current),
     }

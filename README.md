@@ -1,11 +1,12 @@
 # cpugraphapplet
 
 A tiny [Waybar](https://github.com/Alexays/Waybar) custom module that shows
-average CPU usage over the last 16 seconds as a Unicode sparkline
-(`▁▂▃▄▅▆▇█`) directly in the bar.
+CPU usage over the last 16 seconds as a Unicode sparkline (`▁▂▃▄▅▆▇█`)
+directly in the bar.
 
 - Single Python file, standard library only — no `pip install`, no venv.
-- One averaged graph across all cores (remains usable even with a large number of cores).
+- Two display modes: average across all cores, or the single most-loaded core.
+  Both remain usable even with a large number of cores.
 - 8 discrete levels, plus a `class` attribute for CSS-based color changes.
 - Hover tooltip shows the current numeric percentage.
 
@@ -33,6 +34,26 @@ Add to `~/.config/waybar/config`:
 Then reference `"custom/cpu"` in one of `modules-left`, `modules-center`, or
 `modules-right`.
 
+## Display mode
+
+By default the graph shows the **average** usage across all cores. Pass
+`--mode max` to instead show the usage of the **single most-loaded core** —
+useful for spotting a single runaway process on a many-core machine, where
+the average would stay near-zero.
+
+```jsonc
+"custom/cpu": {
+    "exec": "$HOME/.config/waybar/scripts/cpugraphapplet/cpugraphapplet --mode max",
+    "interval": 1,
+    "return-type": "json",
+    "tooltip": true
+}
+```
+
+You can also run two modules side by side (e.g. `custom/cpu-avg` and
+`custom/cpu-max`) — each mode uses its own state file, so their histories
+stay independent.
+
 ## Optional styling
 
 The module emits a `class` of `low`, `medium`, `high`, or `critical` based on
@@ -53,8 +74,8 @@ If the block characters look cramped, force a monospace font:
 
 ## Notes
 
-- **State file:** `$XDG_RUNTIME_DIR/cpugraphapplet.state` (falls back to
-  `/tmp`). Wiped on reboot, which is what you want.
+- **State file:** `$XDG_RUNTIME_DIR/cpugraphapplet.<mode>.state` (falls back
+  to `/tmp`). Wiped on reboot, which is what you want.
 - **First 16 seconds after start:** the graph fills in from the right as
   samples accumulate. Width stays fixed at 16 characters so the bar never
   jumps.
