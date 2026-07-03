@@ -75,6 +75,6 @@ If the block characters look cramped, force a monospace font:
 ## Notes
 
 - **State file:** `$XDG_RUNTIME_DIR/cpugraphapplet.<mode>.state` (falls back
-  to `/tmp`). Wiped on reboot.  jumps.
+  to `/tmp`). Wiped on reboot.
 - **Requirements:** Python 3 (any modern version) and a mono font that renders
   U+2581–U+2588. Most Nerd Fonts and DejaVu Sans Mono are fine.
