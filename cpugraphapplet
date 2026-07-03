@@ -55,13 +55,14 @@ def save_state(mode: str, state: dict) -> None:
 
 
 def sparkline(history: list[float]) -> str:
-    # Left-pad with spaces so the graph is always HISTORY_LEN wide
-    # and grows from the right on first runs.
+    # Left-pad so the graph is always HISTORY_LEN wide and grows from the
+    # right on first runs. NBSP (U+00A0) instead of regular space because
+    # Pango collapses runs of ASCII whitespace in waybar labels.
     padded: list[float | None] = [None] * (HISTORY_LEN - len(history)) + list(history)
     out = []
     for v in padded:
         if v is None:
-            out.append(" ")
+            out.append(" ")
         else:
             idx = min(len(BLOCKS) - 1, int(v / 100 * len(BLOCKS)))
             out.append(BLOCKS[idx])
