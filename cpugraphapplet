@@ -9,6 +9,7 @@ Modes:
 import argparse
 import json
 import os
+import tempfile
 import time
 from pathlib import Path
 
@@ -45,21 +46,51 @@ def read_per_cpu_totals() -> list[tuple[int, int]]:
     return cores
 
 
-def load_state(mode: str) -> dict:
+def debug_log(msg: str) -> None:
+    """Append a timestamped line to a debug log next to the state files.
+
+    Enabled unconditionally so we can diagnose spurious history resets. Only
+    fires on unusual code paths, so the log stays small.
+    """
+    base = os.environ.get("XDG_RUNTIME_DIR") or "/tmp"
     try:
-        return json.loads(state_path(mode).read_text())
-    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        with open(Path(base) / "cpugraphapplet.log", "a") as f:
+            f.write(f"{time.time():.3f} pid={os.getpid()} {msg}\n")
+    except OSError:
+        pass
+
+
+def load_state(mode: str) -> dict:
+    p = state_path(mode)
+    try:
+        return json.loads(p.read_text())
+    except FileNotFoundError:
+        return {"prev_cores": None, "history": []}
+    except (json.JSONDecodeError, OSError) as e:
+        debug_log(f"load_state({mode}) failed ({type(e).__name__}: {e}); defaulting")
         return {"prev_cores": None, "history": []}
 
 
 def save_state(mode: str, state: dict) -> None:
-    # Write via a temp file + atomic rename so a killed/crashed run can never
-    # leave a truncated file — the next invocation would otherwise treat that
-    # as a fresh start and blank the graph mid-session.
+    # Write via a UNIQUE temp file per process + atomic rename. If two
+    # invocations overlap (waybar spawns a second one before the first
+    # finishes), a shared temp filename would have interleaved write()
+    # syscalls producing corrupt JSON — the next load would then hit
+    # JSONDecodeError, fall back to defaults, and blank the graph.
+    # mkstemp guarantees a unique name; os.replace is atomic.
     p = state_path(mode)
-    tmp = p.with_suffix(p.suffix + ".tmp")
-    tmp.write_text(json.dumps(state))
-    tmp.replace(p)
+    fd, tmp_name = tempfile.mkstemp(prefix=p.name + ".", suffix=".tmp", dir=str(p.parent))
+    tmp = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(json.dumps(state))
+        os.replace(tmp, p)
+    except BaseException:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+        raise
 
 
 def sparkline(history: list[float]) -> str:
@@ -104,10 +135,10 @@ def main() -> None:
     prev_cores = state.get("prev_cores")
     prev_wall = state.get("prev_wall")
     history: list[float] = state.get("history", [])
-    # Reset if core count changed (e.g. CPU hotplug) — otherwise the delta
-    # loop would silently drop cores or misalign indices.
+    # On core count change (CPU hotplug) skip the delta this tick, but keep
+    # the history — a hotplug event shouldn't blank the graph.
     if prev_cores is not None and len(prev_cores) != len(cores):
-        history = []
+        debug_log(f"core count changed: {len(prev_cores)} -> {len(cores)}; skipping delta")
         prev_cores = None
 
     # Normalize by wall time × HZ, not by per-core jiffy delta. On NO_HZ
