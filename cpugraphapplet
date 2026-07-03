@@ -53,7 +53,13 @@ def load_state(mode: str) -> dict:
 
 
 def save_state(mode: str, state: dict) -> None:
-    state_path(mode).write_text(json.dumps(state))
+    # Write via a temp file + atomic rename so a killed/crashed run can never
+    # leave a truncated file — the next invocation would otherwise treat that
+    # as a fresh start and blank the graph mid-session.
+    p = state_path(mode)
+    tmp = p.with_suffix(p.suffix + ".tmp")
+    tmp.write_text(json.dumps(state))
+    tmp.replace(p)
 
 
 def sparkline(history: list[float]) -> str:
